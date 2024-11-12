@@ -1,8 +1,6 @@
 @Library('active-shared-libraries') _
 pipeline {
-    agent {
-        docker (image 'itsmeteja9/alphine_jdk_mvn')
-        }
+    agent {label 'Teja'}
 
     tools {
         // Install the Maven version configured as "M3" and add it to the path.

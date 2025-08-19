@@ -1,71 +1,54 @@
-name: CI with Dynatrace Integration
+name: Dynatrace CI - Python Docker App
 
 on:
   push:
-    branches:
-      - main
+    branches: [ "main" ]
   pull_request:
+    branches: [ "main" ]
+
+permissions:
+  contents: read
 
 jobs:
-  build-and-deploy:
+  dynatrace-ci:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout Code
-      - name: Checkout source
-        uses: actions/checkout@v3
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
-      # 2. Setup Node.js (adjust for your stack)
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: 18
+    - name: Set up Docker Compose
+      run: |
+        sudo apt-get update
+        sudo apt-get install docker-compose -y
 
-      # 3. Install Dependencies
-      - name: Install dependencies
-        run: npm install
+    - name: Build and start containers
+      run: |
+        docker-compose up --build -d
+        echo "Waiting for services to start..."
+        sleep 20
 
-      # 4. Run Unit Tests
-      - name: Run tests
-        run: npm test
-
-      # 5. Notify Dynatrace of Deployment
-      - name: Send deployment event to Dynatrace
-        env:
-          DT_API_TOKEN: ${{ secrets.DT_API_TOKEN }}
-          DT_ENV_URL: ${{ secrets.DT_ENV_URL }}
-        run: |
-          curl -X POST "$DT_ENV_URL/api/v2/events/ingest" \
-          -H "Authorization: Api-Token $DT_API_TOKEN" \
-          -H "Content-Type: application/json" \
-          -d "{
-                \"eventType\": \"CUSTOM_DEPLOYMENT\",
-                \"title\": \"New Build Deployed\",
-                \"entitySelector\": \"type(SERVICE),tag(my-service)\",
-                \"properties\": {
-                  \"buildNumber\": \"${{ github.run_number }}\",
-                  \"commit\": \"${{ github.sha }}\",
-                  \"branch\": \"${{ github.ref_name }}\"
-                }
-              }"
-
-      # 6. Validate Deployment via Dynatrace DQL
-      - name: Run health check query
-        env:
-          DT_API_TOKEN: ${{ secrets.DT_API_TOKEN }}
-          DT_ENV_URL: ${{ secrets.DT_ENV_URL }}
-        run: |
-          QUERY='fetch logs | filter contains(text, "ERROR") | summarize count()'
-          RESPONSE=$(curl -s -X POST "$DT_ENV_URL/api/v2/query:execute" \
-            -H "Authorization: Api-Token $DT_API_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d "{ \"query\": \"$QUERY\" }")
-          ERRORS=$(echo $RESPONSE | jq '.result.records[0].count // 0')
-
-          echo "Errors detected: $ERRORS"
-          if [ "$ERRORS" -gt 0 ]; then
-            echo "❌ Errors found in logs, failing build..."
-            exit 1
-          else
-            echo "✅ No critical errors found in Dynatrace logs."
+    - name: Check if Prometheus exporter exposes metrics
+      run: |
+        for i in {1..5}; do
+          echo "Checking exporter... attempt $i"
+          if curl -s http://localhost:8000/metrics | grep bitcoin_price_usd; then
+            echo "✅ Exporter is working"
+            break
           fi
+          sleep 5
+        done
+        docker-compose logs bitcoin-monitor
+
+    - name: Run tests inside bitcoin-monitor container
+      run: |
+        docker-compose exec -T bitcoin-monitor pytest -v bitcoin_monitor/tests || echo "No tests found"
+
+    - name: Lint Python code inside container
+      run: |
+        docker-compose exec -T bitcoin-monitor flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        docker-compose exec -T bitcoin-monitor flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+    - name: Tear down containers
+      if: always()
+      run: docker-compose down

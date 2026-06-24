@@ -8,8 +8,8 @@ on:
 
 jobs:
   rca:
-    uses: your-github-username/Agent-POC/.github/workflows/rca-reusable.yml@main
+    uses: itsmeteja9/Agent-POC/.github/workflows/rca-reusable.yml@main
     with:
-      tool_repo: your-github-username/Agent-POC
+      tool_repo: itsmeteja9/Agent-POC
       log_file: logs.txt
       artifact_name: rca-report
